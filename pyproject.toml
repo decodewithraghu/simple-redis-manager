@@ -2,7 +2,7 @@
 name = "redis-manager"
 version = "1.0.0"
 description = "A powerful CLI tool for managing multiple Redis environments with support for custom connections."
-authors = ["Your Name <you@example.com>"]
+authors = "Raghu Raghavan [decodewithraghu@gmail.com]
 license = "MIT"
 readme = "README.md"
 
