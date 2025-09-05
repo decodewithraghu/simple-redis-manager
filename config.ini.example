@@ -1,0 +1,29 @@
+# Redis Connection Configuration
+# 1. Copy this file to 'config.ini'
+# 2. Fill in the connection details for each environment.
+# 3. For cloud providers like Azure, set ssl = true.
+# 4. Set legacy_mode = true for older Redis servers or proxies that require the RESP2 protocol.
+
+[dev]
+host = localhost
+port = 6379
+db = 0
+password =
+ssl = false
+legacymode = false
+
+[qa]
+host = QA server
+port = 6380
+db = 0
+password = QA_REDIS_PASSWORD
+tls = true
+legacymode = true
+
+[prod-legacy]
+host = legacy-redis.example.com
+port = 6379
+db = 0
+password = your_legacy_password
+tls = false
+legacymode = true

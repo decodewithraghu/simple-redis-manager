@@ -1,0 +1,10 @@
+redis-cli-tool/
+│
+├── src/
+│   ├── __init__.py
+│   └── redis_manager.py
+│
+├── .gitignore
+├── config.ini.example
+├── pyproject.toml
+└── README.md
