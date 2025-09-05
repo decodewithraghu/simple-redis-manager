@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "redis-manager"
+version = "1.0.0"
+description = "A powerful CLI tool for managing multiple Redis environments with support for custom connections."
+authors = ["Your Name <you@example.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+redis = "^5.0.1"
+halo = "^0.0.31"
+certifi = "^2025.8.3"
+
+[tool.poetry.scripts]
+redis-manager = "src.redis_manager:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.main.api"
