@@ -2,9 +2,9 @@ import redis
 import sys
 import os
 import configparser
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from halo import Halo
-import certifi # <-- IMPORT CERTIFI
+import certifi
 
 # Define type aliases for clarity
 EnvConfig = Dict[str, Dict[str, str]]
@@ -27,12 +27,15 @@ class RedisManager:
         self.menu_actions = {
             '1': self._get_all_keys,
             '2': self._delete_a_key,
-            '3': self._flush_all_keys,
-            '4': self._get_key_data,
-            '5': self._set_key_data,
+            '3': self._get_key_data,
+            '4': self._set_key_data,
+            '5': self._find_keys_by_pattern,
+            '6': self._delete_keys_by_pattern,
+            '7': self._flush_all_keys,
         }
 
     def _select_environment(self) -> Optional[str]:
+        """Displays a menu for the user to select an environment or a custom connection."""
         clear_screen()
         print("--- Please select a Redis Environment ---")
         env_keys = list(self.config.keys())
@@ -108,12 +111,10 @@ class RedisManager:
         try:
             final_conn_details = conn_details.copy()
 
-            # --- NEW: Translate user-friendly 'tls' options to library-specific 'ssl' options ---
-
+            # Translate user-friendly 'tls' options to library-specific 'ssl' options
             is_tls = str(final_conn_details.get('tls', 'false')).lower() in ('true', '1', 'y', 'yes')
             is_legacy = str(final_conn_details.get('legacymode', 'false')).lower() in ('true', '1', 'y', 'yes')
 
-            # This is the translation step. The library expects the 'ssl' argument.
             final_conn_details['ssl'] = is_tls
 
             if is_legacy:
@@ -122,15 +123,12 @@ class RedisManager:
             if is_tls:
                 verify_tls = str(final_conn_details.get('tls_verify', 'true')).lower() in ('true', '1', 'y', 'yes')
                 if not verify_tls:
-                    # Translate to the library's argument for disabling verification.
                     final_conn_details['ssl_cert_reqs'] = None
                 else:
-                    # Translate to the library's argument for custom CA certs.
                     custom_ca_path = final_conn_details.get('tls_ca_certs_path')
                     if custom_ca_path and os.path.exists(custom_ca_path):
                         final_conn_details['ssl_ca_certs'] = custom_ca_path
                     else:
-                        # BEST PRACTICE: Default to certifi's bundle.
                         final_conn_details['ssl_ca_certs'] = certifi.where()
 
             # Clean up our custom user-facing keys before passing to redis-py
@@ -138,8 +136,6 @@ class RedisManager:
             final_conn_details.pop('tls_verify', None)
             final_conn_details.pop('tls_ca_certs_path', None)
             final_conn_details.pop('legacymode', None)
-
-            # --- END OF TRANSLATION LOGIC ---
 
             spinner.start()
             self.redis_conn = redis.Redis(**final_conn_details, decode_responses=True, socket_connect_timeout=5)
@@ -154,35 +150,37 @@ class RedisManager:
             input("   Press Enter to return...")
             return False
 
-    # ... The rest of the file (show_operations_menu, operations_loop, run, CRUD methods, main) remains the same ...
     def _show_operations_menu(self):
         clear_screen()
         print(f"--- Connected to {self.current_env_name} ---")
         print("  1) Get all keys")
         print("  2) Delete a specific key")
-        print("  3) DANGER: Delete ALL keys (FLUSH)")
-        print("  4) Get the value for a key")
-        print("  5) Set a new key-value pair")
-        print("  6) Go back (select another environment)")
-        print("  7) Exit")
+        print("  3) Get the value for a key")
+        print("  4) Set a new key-value pair")
+        print("  ---------------------------------")
+        print("  5) Find keys by pattern")
+        print("  6) DANGER: Delete keys by pattern")
+        print("  7) DANGER: Delete ALL keys (FLUSH)")
+        print("  ---------------------------------")
+        print("  8) Go back (select another environment)")
+        print("  9) Exit")
         print("------------------------------------")
 
     def _operations_loop(self):
         while True:
             self._show_operations_menu()
             choice = input(f"[{self.current_env_name}]> ")
-            if choice == '6':
+            if choice == '8': # Go back
                 print("Returning to environment selection...")
                 break
-            if choice == '7':
+            if choice == '9': # Exit
                 raise SystemExit("Goodbye!")
             action = self.menu_actions.get(choice)
             if action:
                 action()
                 input("\nPress Enter to continue...")
             else:
-                print("Invalid choice. Please enter a number from 1 to 7.")
-                input("\nPress Enter to continue...")
+                print("Invalid choice. Please enter a number from the list.")
 
     def run(self):
         while True:
@@ -201,20 +199,9 @@ class RedisManager:
             if conn_details and self._connect(conn_details, display_name):
                 self._operations_loop()
 
+    # --- CRUD and Management Methods ---
     def _get_all_keys(self):
-        spinner = Halo(text='Fetching keys...', spinner='dots')
-        try:
-            spinner.start()
-            keys = self.redis_conn.keys('*')
-            spinner.succeed('Keys fetched.')
-            if not keys:
-                print("-> (empty database)")
-            else:
-                print(f"-> Found {len(keys)} keys:")
-                for i, key in enumerate(sorted(keys), 1):
-                    print(f"   {i}) {key}")
-        except Exception as e:
-            spinner.fail(f"Failed to fetch keys: {e}")
+        self._find_and_display_keys('*', 'Fetching all keys...')
 
     def _delete_a_key(self):
         key = input("Enter the key to delete: ").strip()
@@ -231,19 +218,6 @@ class RedisManager:
                 spinner.warn(f"Key '{key}' not found.")
         except Exception as e:
             spinner.fail(f"Failed to delete key: {e}")
-
-    def _flush_all_keys(self):
-        confirm = input(f"DANGER! This will delete all keys in {self.current_env_name}. Type '{self.current_env_name}' to confirm: ")
-        if confirm != self.current_env_name:
-            print("-> Confirmation did not match. Operation cancelled.")
-            return
-        spinner = Halo(text=f'Flushing database for {self.current_env_name}...', spinner='dots')
-        try:
-            spinner.start()
-            self.redis_conn.flushdb()
-            spinner.succeed("Database has been flushed.")
-        except Exception as e:
-            spinner.fail(f"Failed to flush database: {e}")
 
     def _get_key_data(self):
         key = input("Enter key to get value: ").strip()
@@ -276,6 +250,77 @@ class RedisManager:
         except Exception as e:
             spinner.fail(f"Failed to set key: {e}")
 
+    def _find_keys_by_pattern(self):
+        pattern = input("Enter search pattern (e.g., 'user:*', 'session:???'): ").strip()
+        if not pattern:
+            print("-> No pattern entered. Operation cancelled.")
+            return
+        self._find_and_display_keys(pattern, f"Scanning for keys matching '{pattern}'...")
+
+    def _find_and_display_keys(self, pattern: str, message: str) -> List[str]:
+        """Helper to find keys with SCAN and display them."""
+        spinner = Halo(text=message, spinner='dots')
+        try:
+            spinner.start()
+            keys = sorted(list(self.redis_conn.scan_iter(pattern)))
+            spinner.succeed('Scan complete.')
+            if not keys:
+                print(f"-> No keys found matching pattern '{pattern}'.")
+                return []
+            else:
+                print(f"-> Found {len(keys)} matching keys:")
+                for i, key in enumerate(keys, 1):
+                    print(f"   {i}) {key}")
+                return keys
+        except Exception as e:
+            spinner.fail(f"Failed to scan keys: {e}")
+            return []
+
+    def _delete_keys_by_pattern(self):
+        pattern = input("Enter pattern for keys to DELETE (e.g., 'temp:*'): ").strip()
+        if not pattern:
+            print("-> No pattern entered. Deletion cancelled.")
+            return
+
+        print("\nFirst, finding keys that match this pattern...")
+        keys_to_delete = self._find_and_display_keys(pattern, f"Scanning for keys matching '{pattern}'...")
+        if not keys_to_delete:
+            return
+
+        print("\n" + "="*40)
+        print("⚠️  DANGER ZONE: Review the keys above carefully. ⚠️")
+        print("="*40)
+        confirm = input(f"Type 'DELETE' to permanently delete these {len(keys_to_delete)} keys: ")
+        if confirm != 'DELETE':
+            print("\nConfirmation did not match. Deletion cancelled.")
+            return
+
+        spinner = Halo(text=f'Deleting {len(keys_to_delete)} keys...', spinner='dots')
+        try:
+            spinner.start()
+            deleted_count = 0
+            chunk_size = 500
+            for i in range(0, len(keys_to_delete), chunk_size):
+                chunk = keys_to_delete[i:i + chunk_size]
+                deleted_count += self.redis_conn.delete(*chunk)
+            spinner.succeed(f"Successfully deleted {deleted_count} keys.")
+        except Exception as e:
+            spinner.fail(f"An error occurred during deletion: {e}")
+
+    def _flush_all_keys(self):
+        confirm = input(f"DANGER! This will delete all keys in {self.current_env_name}. Type '{self.current_env_name}' to confirm: ")
+        if confirm != self.current_env_name:
+            print("-> Confirmation did not match. Operation cancelled.")
+            return
+        spinner = Halo(text=f'Flushing database for {self.current_env_name}...', spinner='dots')
+        try:
+            spinner.start()
+            self.redis_conn.flushdb()
+            spinner.succeed("Database has been flushed.")
+        except Exception as e:
+            spinner.fail(f"Failed to flush database: {e}")
+
+# --- Main execution logic ---
 def load_configuration(filepath: str) -> Optional[EnvConfig]:
     parser = configparser.ConfigParser()
     if not os.path.exists(filepath):
@@ -284,11 +329,11 @@ def load_configuration(filepath: str) -> Optional[EnvConfig]:
     return {section: dict(parser.items(section)) for section in parser.sections()}
 
 def main():
-    config_file = 'config.ini.example'
+    config_file = 'config.ini'
     config = load_configuration(config_file)
     if not config:
         config = {}
-        print("Warning: 'config.ini.example' not found. Only custom connections will be available.")
+        print("Warning: 'config.ini' not found. Only custom connections will be available.")
     try:
         app = RedisManager(config)
         app.run()
